@@ -1,0 +1,103 @@
+{
+  "enabled": {
+    "description": "启用插件",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后不再拦截未签署条款的用户或群组。"
+  },
+  "user_sids": {
+    "description": "用户 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "手动填写后才会生效。用户 SID 只处理私聊条款；群聊中不会因为用户 SID 命中而拦截，除非该用户在禁用列表中。"
+  },
+  "group_sids": {
+    "description": "群组 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "手动填写后才会生效。可填写群号、群会话 Session ID 或完整 UMO；群组同意状态按群组整体记录，同意后该群内成员整体放行。"
+  },
+  "admin_sids": {
+    "description": "条款管理员 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "这些用户可以在聊天中使用 /terms 管理指令查看、修改、重置签署状态并发布新条款。"
+  },
+  "disabled_user_sids": {
+    "description": "禁用用户 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "这些用户触发机器人时会被直接拦截，并提示联系开发者。"
+  },
+  "disabled_group_sids": {
+    "description": "禁用群组 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "这些群组触发机器人时会被直接拦截，并提示联系开发者。"
+  },
+  "disabled_message": {
+    "description": "禁用提示",
+    "type": "text",
+    "default": "该用户或群组已被禁用，请联系开发者处理。",
+    "hint": "支持占位符：{scopes}、{user_id}、{user_name}、{group_id}、{platform_id}、{umo}。"
+  },
+  "terms_text": {
+    "description": "用户条款正文",
+    "type": "text",
+    "default": "1. 使用机器人时请遵守所在平台与群组规则。\n2. 不要发送违法、侵权、骚扰或滥用内容。\n3. 管理员可根据实际情况停止服务或清理违规使用记录。",
+    "hint": "会替换消息模板中的 {terms}。"
+  },
+  "prompt_message": {
+    "description": "首次条款提示",
+    "type": "text",
+    "default": "请同意以下条款来得到使用权限：\n{terms}\n\n当前需要签署：{scopes}\n请阅读后回复“{accept_phrase}”；回复“拒绝”将无法继续使用。",
+    "hint": "支持占位符：{terms}、{terms_revision}、{scopes}、{accept_phrase}、{user_id}、{user_name}、{group_id}、{platform_id}、{umo}。"
+  },
+  "premature_accept_message": {
+    "description": "未阅读时提前同意提示",
+    "type": "text",
+    "default": "请先阅读以下用户条款，再回复“{accept_phrase}”完成签署：\n{terms}\n\n当前需要签署：{scopes}",
+    "hint": "用户第一次交互就直接发送同意关键词时发送。支持占位符：{terms}、{terms_revision}、{scopes}、{accept_phrase}、{user_id}、{user_name}、{group_id}、{platform_id}、{umo}。"
+  },
+  "accepted_message": {
+    "description": "同意后的提示",
+    "type": "text",
+    "default": "已记录你对 {scopes} 的用户条款同意状态，现在可以继续使用。",
+    "hint": "用户回复同意关键词后发送。支持占位符：{terms}、{terms_revision}、{scopes}、{accept_phrase}、{user_id}、{user_name}、{group_id}、{platform_id}、{umo}。"
+  },
+  "rejected_message": {
+    "description": "拒绝后的提示",
+    "type": "text",
+    "default": "你已拒绝用户条款。必须同意条款后才可以使用；请阅读条款后回复“{accept_phrase}”以重新签署。",
+    "hint": "用户回复拒绝关键词后发送。支持占位符：{terms}、{terms_revision}、{scopes}、{accept_phrase}、{user_id}、{user_name}、{group_id}、{platform_id}、{umo}。"
+  },
+  "invalid_message": {
+    "description": "无效回复提示",
+    "type": "text",
+    "default": "必须同意用户条款后才可以使用。请阅读条款后回复“{accept_phrase}”。",
+    "hint": "用户已被提示过条款，但再次发送无意义内容时发送。支持占位符：{terms}、{terms_revision}、{scopes}、{accept_phrase}、{user_id}、{user_name}、{group_id}、{platform_id}、{umo}。"
+  },
+  "accept_keywords": {
+    "description": "同意关键词",
+    "type": "list",
+    "default": [
+      "我已知晓并同意遵守条款所有内容"
+    ],
+    "hint": "完全匹配才会视为同意；匹配时会忽略空白。旧默认值“同意”会自动升级为新的完整同意句。"
+  },
+  "reject_keywords": {
+    "description": "拒绝关键词",
+    "type": "list",
+    "default": [
+      "拒绝",
+      "不同意"
+    ],
+    "hint": "完全匹配才会视为拒绝；匹配时会忽略空白。"
+  },
+  "allow_wake_command_as_at": {
+    "description": "允许唤醒/命令视为交互",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，群聊里 AstrBot 判定为艾特、唤醒词、命令前缀或其它插件命中的交互消息才会触发条款检查；普通群聊消息不会触发。"
+  }
+}

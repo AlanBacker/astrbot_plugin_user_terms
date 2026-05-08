@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>用户条款签署面板</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>用户条款签署面板</h1>
+          <p id="revision">正在读取当前条款版本</p>
+        </div>
+        <button id="refresh" type="button">刷新</button>
+      </header>
+
+      <section class="stats" aria-label="签署统计">
+        <div class="metric">
+          <span>已同意</span>
+          <strong id="statAccepted">0</strong>
+        </div>
+        <div class="metric">
+          <span>待签署</span>
+          <strong id="statPending">0</strong>
+        </div>
+        <div class="metric">
+          <span>已拒绝</span>
+          <strong id="statRejected">0</strong>
+        </div>
+        <div class="metric">
+          <span>旧条款</span>
+          <strong id="statOld">0</strong>
+        </div>
+      </section>
+
+      <section class="layout">
+        <aside class="panel">
+          <h2>目标列表</h2>
+          <div id="targets" class="list empty">暂无目标</div>
+
+          <h2>禁用列表</h2>
+          <div id="disabledTargets" class="list empty">暂无禁用项</div>
+        </aside>
+
+        <section class="panel table-panel">
+          <div class="panel-head">
+            <h2>签署记录</h2>
+            <input id="filter" type="search" placeholder="筛选 SID / 用户名 / 平台" />
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>范围</th>
+                  <th>目标 SID</th>
+                  <th>签署用户</th>
+                  <th>状态</th>
+                  <th>条款版</th>
+                  <th>最后触发</th>
+                </tr>
+              </thead>
+              <tbody id="records"></tbody>
+            </table>
+          </div>
+          <div id="emptyRecords" class="empty">暂无签署记录</div>
+        </section>
+      </section>
+
+      <section class="panel publish">
+        <div>
+          <h2>发布新条款</h2>
+          <p>发布后会把所有已记录用户重置为待签署，下一次触发机器人时需要重新同意。</p>
+        </div>
+        <label>
+          新条款正文
+          <textarea id="newTerms" rows="8"></textarea>
+        </label>
+        <label>
+          版本备注
+          <input id="note" type="text" placeholder="例如：2026-05 条款更新" />
+        </label>
+        <div class="actions">
+          <button id="publish" type="button">发布并重置</button>
+          <span id="message" role="status"></span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

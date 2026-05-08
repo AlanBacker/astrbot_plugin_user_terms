@@ -1,0 +1,12 @@
+name: astrbot_plugin_user_terms
+display_name: 用户条款
+desc: 为指定用户 SID 或群组 SID 要求单独同意用户条款后才允许继续使用机器人。
+short_desc: 按用户与群组独立记录用户条款同意状态。
+version: 1.0.0
+author: alanbacker
+repo: ""
+astrbot_version: ">=4.9.2"
+pages:
+  - name: terms-dashboard
+    title: 签署面板
+    description: 查看条款签署状态、禁用列表并发布新条款。
