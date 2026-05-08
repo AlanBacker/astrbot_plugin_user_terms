@@ -78,6 +78,7 @@ class UserTermsPlugin(Star):
         self.data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self.db_path = self.data_dir / "terms.sqlite3"
         self._init_db()
+        self._sync_configured_terms_text()
         self._sync_configured_targets()
         self._register_page_api(context)
 
@@ -98,6 +99,17 @@ class UserTermsPlugin(Star):
                 f"{PLUGIN_NAME}: failed to set config {key!r}\n{traceback.format_exc()}",
             )
             return
+
+    def _save_config(self) -> None:
+        save_config = getattr(self.config, "save_config", None)
+        if not callable(save_config):
+            return
+        try:
+            save_config()
+        except Exception:
+            logger.error(
+                f"{PLUGIN_NAME}: failed to save config\n{traceback.format_exc()}",
+            )
 
     def _migrate_legacy_config_defaults(self) -> None:
         legacy_accept = {self._normalize_action_text("同意")}
@@ -236,6 +248,45 @@ class UserTermsPlugin(Star):
             ),
         )
 
+    def _sync_configured_terms_text(self) -> None:
+        configured_terms = self._configured_terms_text()
+        if not self._is_custom_terms_text(configured_terms):
+            return
+
+        now = self._now()
+        with self._db() as conn:
+            row = conn.execute(
+                """
+                SELECT revision, terms_text
+                FROM terms_revisions
+                ORDER BY revision DESC
+                LIMIT 1
+                """,
+            ).fetchone()
+            if row and str(row["terms_text"]).strip() == configured_terms:
+                return
+
+            next_revision = int(row["revision"]) + 1 if row else 1
+            conn.execute(
+                """
+                INSERT INTO terms_revisions (revision, terms_text, note, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (next_revision, configured_terms, "配置文件条款正文同步", now),
+            )
+            conn.execute(
+                """
+                UPDATE term_acceptances
+                SET status = ?,
+                    prompt_count = 0,
+                    prompted_at = NULL,
+                    decided_at = NULL,
+                    terms_revision = ?,
+                    last_seen_at = ?
+                """,
+                (STATUS_PENDING, next_revision, now),
+            )
+
     def _register_page_api(self, context: Context) -> None:
         register_web_api = getattr(context, "register_web_api", None)
         if not callable(register_web_api):
@@ -309,6 +360,8 @@ class UserTermsPlugin(Star):
 
         if not self._is_user_addressing_bot(event):
             return
+
+        self._sync_configured_terms_text()
 
         disabled_scopes = self._disabled_scopes(event)
         if disabled_scopes:
@@ -1214,6 +1267,13 @@ class UserTermsPlugin(Star):
             text = text.replace("{" + key + "}", value or "")
         return text
 
+    def _configured_terms_text(self) -> str:
+        return str(self._cfg("terms_text", DEFAULT_TERMS_TEXT) or "").strip()
+
+    @staticmethod
+    def _is_custom_terms_text(terms_text: str) -> bool:
+        return bool(terms_text) and terms_text != DEFAULT_TERMS_TEXT
+
     def _current_terms_revision(self) -> int:
         with self._db() as conn:
             row = conn.execute(
@@ -1222,6 +1282,7 @@ class UserTermsPlugin(Star):
         return int(row["revision"]) if row else 1
 
     def _active_terms_text(self) -> str:
+        self._sync_configured_terms_text()
         with self._db() as conn:
             row = conn.execute(
                 """
@@ -1233,7 +1294,7 @@ class UserTermsPlugin(Star):
             ).fetchone()
         if row and row["terms_text"]:
             return str(row["terms_text"])
-        return str(self._cfg("terms_text", DEFAULT_TERMS_TEXT))
+        return self._configured_terms_text() or DEFAULT_TERMS_TEXT
 
     def _publish_terms(self, terms_text: str, note: str = "") -> int:
         terms = terms_text.strip() or self._active_terms_text()
@@ -1262,6 +1323,8 @@ class UserTermsPlugin(Star):
                 """,
                 (STATUS_PENDING, next_revision, now),
             )
+        self._set_cfg("terms_text", terms)
+        self._save_config()
         return next_revision
 
     async def page_status(self):
@@ -1299,6 +1362,7 @@ class UserTermsPlugin(Star):
         )
 
     def _dashboard_payload(self) -> dict[str, Any]:
+        self._sync_configured_terms_text()
         current_revision = self._current_terms_revision()
         with self._db() as conn:
             rows = [
