@@ -3,17 +3,15 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 from quart import jsonify, request
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 import astrbot.api.message_components as Comp
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.star.filter.command import GreedyStr
-from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 
 PLUGIN_NAME = "astrbot_plugin_user_terms"
@@ -70,8 +68,7 @@ class UserTermsPlugin(Star):
         super().__init__(context, config)
         self.config = config or {}
         self._migrate_legacy_config_defaults()
-        self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self.db_path = self.data_dir / "terms.sqlite3"
         self._init_db()
         self._sync_configured_targets()
@@ -242,7 +239,7 @@ class UserTermsPlugin(Star):
         return conn
 
     @contextmanager
-    def _db(self):
+    def _db(self) -> Iterator[sqlite3.Connection]:
         conn = self._connect()
         try:
             yield conn
@@ -517,29 +514,29 @@ class UserTermsPlugin(Star):
         return scopes
 
     def _user_candidates(self, event: AstrMessageEvent) -> set[str]:
-        candidates = {event.get_sender_id()}
+        candidates: list[Any] = [event.get_sender_id()]
         if event.is_private_chat():
-            candidates.update(
-                {
+            candidates.extend(
+                [
                     event.get_session_id(),
                     getattr(event, "session_id", ""),
                     getattr(event, "unified_msg_origin", ""),
-                },
+                ],
             )
-        return {value for value in (self._clean_sid(item) for item in candidates) if value}
+        return self._clean_sid_set(candidates)
 
     def _group_candidates(self, event: AstrMessageEvent) -> set[str]:
         group_id = self._clean_sid(event.get_group_id())
         if not group_id:
             return set()
 
-        candidates = {
+        candidates = [
             group_id,
             event.get_session_id(),
             getattr(event, "session_id", ""),
             getattr(event, "unified_msg_origin", ""),
-        }
-        return {value for value in (self._clean_sid(item) for item in candidates) if value}
+        ]
+        return self._clean_sid_set(candidates)
 
     def _first_configured_match(self, key: str, candidates: set[str]) -> str:
         for sid in self._sid_values(key):
@@ -581,6 +578,14 @@ class UserTermsPlugin(Star):
             sid = self._clean_sid(value)
             if sid and sid not in cleaned:
                 cleaned.append(sid)
+        return cleaned
+
+    def _clean_sid_set(self, values: list[Any]) -> set[str]:
+        cleaned: set[str] = set()
+        for value in values:
+            sid = self._clean_sid(value)
+            if sid:
+                cleaned.add(sid)
         return cleaned
 
     @staticmethod
@@ -858,7 +863,7 @@ class UserTermsPlugin(Star):
             return False
         return bool(self._user_candidates(event) & admin_sids)
 
-    def _admin_guarded(self, event: AstrMessageEvent, action) -> str:
+    def _admin_guarded(self, event: AstrMessageEvent, action: Callable[[], str]) -> str:
         if not self._is_terms_admin(event):
             return "你没有权限使用条款管理指令。"
         return action()
@@ -1101,7 +1106,8 @@ class UserTermsPlugin(Star):
             "全部": "all",
             "all": "all",
         }
-        return mapping.get(str(value or "").strip().lower(), str(value or "").strip().lower())
+        normalized = str(value or "").strip().lower()
+        return mapping.get(normalized, normalized)
 
     @staticmethod
     def _normalize_status(value: str) -> str:
