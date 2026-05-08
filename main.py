@@ -1,6 +1,9 @@
+import asyncio
+import inspect
 import re
 import sqlite3
 import time
+import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator
@@ -19,6 +22,10 @@ TERMS_INTERCEPT_PRIORITY = 1_000_000
 STATUS_PENDING = "pending"
 STATUS_ACCEPTED = "accepted"
 STATUS_REJECTED = "rejected"
+SAFE_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ALLOWED_SCHEMA_COLUMNS = {
+    ("term_acceptances", "terms_revision"): "INTEGER NOT NULL DEFAULT 1",
+}
 DEFAULT_ACCEPT_PHRASE = "我已知晓并同意遵守条款所有内容"
 DEFAULT_TERMS_TEXT = (
     "1. 使用机器人时请遵守所在平台与群组规则。\n"
@@ -78,12 +85,18 @@ class UserTermsPlugin(Star):
         try:
             return self.config.get(key, default)
         except Exception:
+            logger.error(
+                f"{PLUGIN_NAME}: failed to read config {key!r}\n{traceback.format_exc()}",
+            )
             return default
 
     def _set_cfg(self, key: str, value: Any) -> None:
         try:
             self.config[key] = value
         except Exception:
+            logger.error(
+                f"{PLUGIN_NAME}: failed to set config {key!r}\n{traceback.format_exc()}",
+            )
             return
 
     def _migrate_legacy_config_defaults(self) -> None:
@@ -184,12 +197,24 @@ class UserTermsPlugin(Star):
         column: str,
         ddl: str,
     ) -> None:
+        self._validate_schema_column(table, column, ddl)
         columns = {
             str(row["name"])
             for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
         }
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+    @staticmethod
+    def _validate_schema_column(table: str, column: str, ddl: str) -> None:
+        if not SAFE_SQL_IDENTIFIER_RE.fullmatch(table):
+            raise ValueError(f"unsafe sqlite table identifier: {table!r}")
+        if not SAFE_SQL_IDENTIFIER_RE.fullmatch(column):
+            raise ValueError(f"unsafe sqlite column identifier: {column!r}")
+        if ALLOWED_SCHEMA_COLUMNS.get((table, column)) != ddl:
+            raise ValueError(
+                f"unexpected sqlite schema migration: {table}.{column} {ddl}",
+            )
 
     def _ensure_initial_terms_revision(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
@@ -295,7 +320,7 @@ class UserTermsPlugin(Star):
                 disabled_scopes,
                 event,
             )
-            yield self._stop_result(event, text)
+            yield await self._stop_result(event, text)
             return
 
         scopes = self._applicable_scopes(event)
@@ -332,7 +357,7 @@ class UserTermsPlugin(Star):
                     unsigned_scopes,
                     event,
                 )
-                yield self._stop_result(event, text)
+                yield await self._stop_result(event, text)
                 return
 
             self._set_status(unsigned_scopes, event, STATUS_ACCEPTED)
@@ -344,7 +369,7 @@ class UserTermsPlugin(Star):
                 unsigned_scopes,
                 event,
             )
-            yield self._stop_result(event, text)
+            yield await self._stop_result(event, text)
             return
 
         if action == "reject":
@@ -357,7 +382,7 @@ class UserTermsPlugin(Star):
                 unsigned_scopes,
                 event,
             )
-            yield self._stop_result(event, text)
+            yield await self._stop_result(event, text)
             return
 
         template_key = "invalid_message" if has_prompted else "prompt_message"
@@ -368,7 +393,7 @@ class UserTermsPlugin(Star):
             unsigned_scopes,
             event,
         )
-        yield self._stop_result(event, text)
+        yield await self._stop_result(event, text)
 
     @filter.command_group(
         "terms",
@@ -382,7 +407,7 @@ class UserTermsPlugin(Star):
     @terms.command("help", alias={"帮助"}, priority=TERMS_INTERCEPT_PRIORITY)
     async def terms_help(self, event: AstrMessageEvent):
         """查看用户条款管理指令。"""
-        yield self._stop_result(event, self._admin_guarded(event, self._admin_help))
+        yield await self._stop_result(event, self._admin_guarded(event, self._admin_help))
 
     @terms.command("status", alias={"list", "查看", "状态"}, priority=TERMS_INTERCEPT_PRIORITY)
     async def terms_status(
@@ -393,7 +418,7 @@ class UserTermsPlugin(Star):
         signer_user_id: str = "",
     ):
         """查看用户或群组的条款签署状态。"""
-        yield self._stop_result(
+        yield await self._stop_result(
             event,
             self._admin_guarded(
                 event,
@@ -414,7 +439,7 @@ class UserTermsPlugin(Star):
         args = [scope_type, scope_id, signer_or_status]
         if status:
             args.append(status)
-        yield self._stop_result(
+        yield await self._stop_result(
             event,
             self._admin_guarded(event, lambda: self._admin_set_status(args, event)),
         )
@@ -428,7 +453,7 @@ class UserTermsPlugin(Star):
         signer_user_id: str = "",
     ):
         """重置用户或群组的条款签署状态。"""
-        yield self._stop_result(
+        yield await self._stop_result(
             event,
             self._admin_guarded(
                 event,
@@ -439,7 +464,7 @@ class UserTermsPlugin(Star):
     @terms.command("publish", alias={"发布"}, priority=TERMS_INTERCEPT_PRIORITY)
     async def terms_publish(self, event: AstrMessageEvent, terms_text: GreedyStr):
         """发布新条款并重置已有签署记录。"""
-        yield self._stop_result(
+        yield await self._stop_result(
             event,
             self._admin_guarded(
                 event,
@@ -1240,19 +1265,31 @@ class UserTermsPlugin(Star):
         return next_revision
 
     async def page_status(self):
-        return jsonify(self._dashboard_payload())
+        payload = await asyncio.to_thread(self._dashboard_payload)
+        return jsonify(payload)
 
     async def page_publish_terms(self):
-        body = await request.get_json(silent=True)
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "request body must be JSON"}), 415
+
+        try:
+            body = await request.get_json()
+        except Exception:
+            logger.error(
+                f"{PLUGIN_NAME}: failed to parse publish request JSON\n"
+                f"{traceback.format_exc()}",
+            )
+            return jsonify({"ok": False, "error": "invalid JSON body"}), 400
+
         if not isinstance(body, dict):
-            body = {}
+            return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
 
         terms_text = str(body.get("terms_text") or "").strip()
         note = str(body.get("note") or "").strip()
         if not terms_text:
             return jsonify({"ok": False, "error": "terms_text is required"}), 400
 
-        revision = self._publish_terms(terms_text, note)
+        revision = await asyncio.to_thread(self._publish_terms, terms_text, note)
         return jsonify(
             {
                 "ok": True,
@@ -1397,12 +1434,18 @@ class UserTermsPlugin(Star):
         return int(value)
 
     @staticmethod
-    def _stop_result(event: AstrMessageEvent, text: str):
+    async def _stop_result(event: AstrMessageEvent, text: str):
         result = event.plain_result(text)
         stop_event = getattr(event, "stop_event", None)
         if callable(stop_event):
-            stop_event()
-        result.stop_event()
+            maybe_awaitable = stop_event()
+            if inspect.isawaitable(maybe_awaitable):
+                await maybe_awaitable
+        result_stop_event = getattr(result, "stop_event", None)
+        if callable(result_stop_event):
+            maybe_awaitable = result_stop_event()
+            if inspect.isawaitable(maybe_awaitable):
+                await maybe_awaitable
         return result
 
     @staticmethod
