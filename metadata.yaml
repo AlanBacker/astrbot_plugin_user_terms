@@ -1,6 +1,6 @@
 name: astrbot_plugin_user_terms
-display_name: 用户条款
-desc: 为指定用户 SID 或群组 SID 要求单独同意用户条款后才允许继续使用机器人。
+display_name: 用户条款签署控制
+desc: 用户条款签署控制插件，为指定用户 SID 或群组 SID 要求单独同意用户条款后才允许继续使用机器人。
 short_desc: 按用户与群组独立记录用户条款同意状态。
 version: 1.0.0
 author: AlanBacker
