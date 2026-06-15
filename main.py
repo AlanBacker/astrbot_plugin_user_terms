@@ -453,6 +453,7 @@ class UserTermsPlugin(Star):
         alias={"条款管理", "用户条款管理"},
         priority=TERMS_INTERCEPT_PRIORITY,
     )
+    @filter.permission_type(filter.PermissionType.ADMIN)
     def terms(self):
         """用户条款管理指令组。"""
         pass
