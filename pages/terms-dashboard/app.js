@@ -7,12 +7,14 @@ const state = {
 
 const els = {
   revision: document.getElementById("revision"),
+  scopeModes: document.getElementById("scopeModes"),
   refresh: document.getElementById("refresh"),
   statAccepted: document.getElementById("statAccepted"),
   statPending: document.getElementById("statPending"),
   statRejected: document.getElementById("statRejected"),
   statOld: document.getElementById("statOld"),
   targets: document.getElementById("targets"),
+  exemptTargets: document.getElementById("exemptTargets"),
   disabledTargets: document.getElementById("disabledTargets"),
   filter: document.getElementById("filter"),
   records: document.getElementById("records"),
@@ -33,6 +35,11 @@ const statusLabel = {
 const scopeLabel = {
   user: "用户",
   group: "群组",
+};
+
+const sourceLabel = {
+  manual: "手动",
+  auto: "自动",
 };
 
 function escapeHtml(value) {
@@ -62,6 +69,13 @@ function renderStats(payload) {
   els.statOld.textContent = stats.pending_new_terms || 0;
 }
 
+function renderScopeModes(payload) {
+  const modes = payload.scope_modes || {};
+  const user = (modes.user && modes.user.label) || "-";
+  const group = (modes.group && modes.group.label) || "-";
+  els.scopeModes.textContent = `生效范围：用户 ${user} · 群组 ${group}`;
+}
+
 function renderTargets(payload) {
   const targets = payload.configured_targets || [];
   els.targets.classList.toggle("empty", targets.length === 0);
@@ -71,10 +85,11 @@ function renderTargets(payload) {
         const stats = target.stats || {};
         const scope = escapeHtml(scopeLabel[target.scope_type] || target.scope_type);
         const sid = escapeHtml(target.scope_id);
+        const source = target.source === "auto" ? "auto" : "manual";
         return `
-          <div class="list-row">
+          <div class="list-row${target.disabled ? " disabled" : ""}">
             <div>
-              <strong>${scope} ${sid}</strong>
+              <strong>${scope} ${sid}<span class="tag ${source}">${sourceLabel[source]}</span></strong>
               <span>${target.total_records || 0} 条记录</span>
             </div>
             <small>同意 ${stats.accepted || 0} / 待签 ${stats.pending || 0} / 拒绝 ${stats.rejected || 0}</small>
@@ -82,6 +97,24 @@ function renderTargets(payload) {
         `;
       })
       .join("") || "暂无目标";
+
+  const exempt = payload.exempt_targets || [];
+  els.exemptTargets.classList.toggle("empty", exempt.length === 0);
+  els.exemptTargets.innerHTML =
+    exempt
+      .map((target) => {
+        const scope = escapeHtml(scopeLabel[target.scope_type] || target.scope_type);
+        const sid = escapeHtml(target.scope_id);
+        return `
+          <div class="list-row exempt">
+            <div>
+              <strong>${scope} ${sid}</strong>
+              <span>无需签署</span>
+            </div>
+          </div>
+        `;
+      })
+      .join("") || "暂无豁免项";
 
   const disabled = payload.disabled_targets || [];
   els.disabledTargets.classList.toggle("empty", disabled.length === 0);
@@ -147,6 +180,7 @@ function render(payload) {
   if (!els.newTerms.value.trim()) {
     els.newTerms.value = payload.active_terms_text || "";
   }
+  renderScopeModes(payload);
   renderStats(payload);
   renderTargets(payload);
   renderRecords(payload);

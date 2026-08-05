@@ -22,6 +22,23 @@ TERMS_INTERCEPT_PRIORITY = 1_000_000
 STATUS_PENDING = "pending"
 STATUS_ACCEPTED = "accepted"
 STATUS_REJECTED = "rejected"
+SCOPE_MODE_ALL = "all"
+SCOPE_MODE_MANUAL = "manual"
+SCOPE_MODE_ALIASES = {
+    "all": SCOPE_MODE_ALL,
+    "auto": SCOPE_MODE_ALL,
+    "全部": SCOPE_MODE_ALL,
+    "全部用户": SCOPE_MODE_ALL,
+    "全部群组": SCOPE_MODE_ALL,
+    "manual": SCOPE_MODE_MANUAL,
+    "list": SCOPE_MODE_MANUAL,
+    "手动": SCOPE_MODE_MANUAL,
+    "手动指定": SCOPE_MODE_MANUAL,
+}
+SCOPE_MODE_LABELS = {
+    "user": {SCOPE_MODE_ALL: "全部用户", SCOPE_MODE_MANUAL: "手动指定用户"},
+    "group": {SCOPE_MODE_ALL: "全部群组", SCOPE_MODE_MANUAL: "手动指定群组"},
+}
 SAFE_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALLOWED_SCHEMA_COLUMNS = {
     ("term_acceptances", "terms_revision"): "INTEGER NOT NULL DEFAULT 1",
@@ -75,6 +92,7 @@ class UserTermsPlugin(Star):
         super().__init__(context, config)
         self.config = config or {}
         self._migrate_legacy_config_defaults()
+        self._migrate_scope_modes()
         self.data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self.db_path = self.data_dir / "terms.sqlite3"
         self._init_db()
@@ -141,6 +159,36 @@ class UserTermsPlugin(Star):
         for key, legacy_template in legacy_templates.items():
             if self._cfg(key) == legacy_template:
                 self._set_cfg(key, new_templates[key])
+
+    def _migrate_scope_modes(self) -> None:
+        """旧版本只支持手动 SID；升级时保留已配置作用域的手动模式，只执行一次。"""
+        if self._cfg("scope_mode_migrated", False):
+            return
+
+        for scope_type in ("user", "group"):
+            if self._sid_list(f"{scope_type}_sids"):
+                self._set_cfg(f"{scope_type}_scope_mode", SCOPE_MODE_MANUAL)
+        self._set_cfg("scope_mode_migrated", True)
+        self._save_config()
+
+    def _scope_mode(self, scope_type: str) -> str:
+        raw = self._cfg(f"{scope_type}_scope_mode", SCOPE_MODE_ALL)
+        normalized = str(raw or "").strip().lower()
+        return SCOPE_MODE_ALIASES.get(normalized, SCOPE_MODE_ALL)
+
+    @staticmethod
+    def _scope_mode_label(scope_type: str, mode: str) -> str:
+        return SCOPE_MODE_LABELS.get(scope_type, {}).get(mode, mode)
+
+    def _scope_mode_summary(self) -> dict[str, dict[str, str]]:
+        summary: dict[str, dict[str, str]] = {}
+        for scope_type in ("user", "group"):
+            mode = self._scope_mode(scope_type)
+            summary[scope_type] = {
+                "mode": mode,
+                "label": self._scope_mode_label(scope_type, mode),
+            }
+        return summary
 
     def _init_db(self) -> None:
         with self._db() as conn:
@@ -532,11 +580,9 @@ class UserTermsPlugin(Star):
             return []
 
         scopes: list[TermsScope] = []
-        user_candidates = self._user_candidates(event)
-        group_candidates = self._group_candidates(event)
 
         if not event.is_private_chat():
-            matched_group = self._first_configured_match("group_sids", group_candidates)
+            matched_group = self._matched_group_scope_id(event)
             if matched_group:
                 if self._group_is_currently_accepted(matched_group):
                     return []
@@ -549,7 +595,7 @@ class UserTermsPlugin(Star):
                 )
             return scopes
 
-        if user_candidates & self._sid_values("user_sids"):
+        if self._user_scope_applies(self._user_candidates(event)):
             scopes.append(
                 TermsScope(
                     scope_type="user",
@@ -558,6 +604,31 @@ class UserTermsPlugin(Star):
                 ),
             )
         return scopes
+
+    def _matched_group_scope_id(self, event: AstrMessageEvent) -> str:
+        """返回该群聊需要签署的群组作用域 SID，不需要签署时返回空串。"""
+        candidates = self._group_candidates(event)
+        if not candidates:
+            return ""
+        if candidates & self._sid_values("exempt_group_sids"):
+            return ""
+
+        configured = self._first_configured_match("group_sids", candidates)
+        if configured:
+            return configured
+        if self._scope_mode("group") != SCOPE_MODE_ALL:
+            return ""
+        return self._clean_sid(event.get_group_id())
+
+    def _user_scope_applies(self, candidates: set[str]) -> bool:
+        """判断该私聊用户是否需要签署用户作用域条款。"""
+        if not candidates:
+            return False
+        if candidates & self._sid_values("exempt_user_sids"):
+            return False
+        if candidates & self._sid_values("user_sids"):
+            return True
+        return self._scope_mode("user") == SCOPE_MODE_ALL
 
     def _disabled_scopes(self, event: AstrMessageEvent) -> list[TermsScope]:
         sender_id = self._clean_sid(event.get_sender_id())
@@ -977,8 +1048,10 @@ class UserTermsPlugin(Star):
 
         rows = self._list_acceptances(scope_type, scope_id, signer_user_id, limit=20)
         payload = self._dashboard_payload()
+        scope_modes = payload["scope_modes"]
         header = (
             f"当前条款版本：v{payload['current_revision']}\n"
+            f"生效范围：{scope_modes['user']['label']} / {scope_modes['group']['label']}\n"
             f"统计：已同意 {payload['stats'].get('accepted', 0)}，"
             f"待签署 {payload['stats'].get('pending', 0)}，"
             f"已拒绝 {payload['stats'].get('rejected', 0)}，"
@@ -1403,7 +1476,9 @@ class UserTermsPlugin(Star):
             "plugin": PLUGIN_NAME,
             "current_revision": current_revision,
             "active_terms_text": self._active_terms_text(),
+            "scope_modes": self._scope_mode_summary(),
             "configured_targets": self._configured_target_summary(rows),
+            "exempt_targets": self._exempt_target_summary(),
             "disabled_targets": self._disabled_target_summary(),
             "acceptances": rows,
             "revisions": revisions,
@@ -1445,12 +1520,20 @@ class UserTermsPlugin(Star):
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         targets: list[dict[str, Any]] = []
-        for scope_type, key, disabled_key in (
-            ("user", "user_sids", "disabled_user_sids"),
-            ("group", "group_sids", "disabled_group_sids"),
-        ):
-            disabled_values = self._sid_values(disabled_key)
-            for sid in sorted(self._sid_values(key)):
+        for scope_type in ("user", "group"):
+            configured = self._sid_values(f"{scope_type}_sids")
+            exempt_values = self._sid_values(f"exempt_{scope_type}_sids")
+            disabled_values = self._sid_values(f"disabled_{scope_type}_sids")
+
+            sids = set(configured)
+            if self._scope_mode(scope_type) == SCOPE_MODE_ALL:
+                # 全量模式下没有配置列表，改用实际出现过的目标补全面板。
+                sids |= {
+                    row["scope_id"] for row in rows if row["scope_type"] == scope_type
+                }
+            sids -= exempt_values
+
+            for sid in sorted(sids):
                 scope_rows = [
                     row
                     for row in rows
@@ -1460,11 +1543,19 @@ class UserTermsPlugin(Star):
                     {
                         "scope_type": scope_type,
                         "scope_id": sid,
+                        "source": "manual" if sid in configured else "auto",
                         "disabled": sid in disabled_values,
                         "total_records": len(scope_rows),
                         "stats": self._status_stats(scope_rows),
                     },
                 )
+        return targets
+
+    def _exempt_target_summary(self) -> list[dict[str, str]]:
+        targets: list[dict[str, str]] = []
+        for scope_type in ("user", "group"):
+            for sid in sorted(self._sid_values(f"exempt_{scope_type}_sids")):
+                targets.append({"scope_type": scope_type, "scope_id": sid})
         return targets
 
     def _disabled_target_summary(self) -> list[dict[str, str]]:

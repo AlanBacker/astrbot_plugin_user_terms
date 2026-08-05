@@ -5,17 +5,47 @@
     "default": true,
     "hint": "关闭后不再拦截未签署条款的用户或群组。"
   },
+  "user_scope_mode": {
+    "description": "用户条款生效范围",
+    "type": "string",
+    "default": "all",
+    "options": ["all", "manual"],
+    "labels": ["全部用户", "手动指定用户 SID"],
+    "obvious_hint": true,
+    "hint": "全部用户：所有私聊用户都必须先同意条款，不用逐个添加；手动指定用户 SID：只有下方“用户 SID 列表”里的用户才需要签署。"
+  },
   "user_sids": {
     "description": "用户 SID 列表",
     "type": "list",
     "default": [],
-    "hint": "手动填写后才会生效。用户 SID 只处理私聊条款；群聊中不会因为用户 SID 命中而拦截，除非该用户在禁用列表中。"
+    "hint": "“手动指定用户 SID”模式下必须填写才会生效；“全部用户”模式下这里的用户同样生效。用户 SID 只处理私聊条款；群聊中不会因为用户 SID 命中而拦截，除非该用户在禁用列表中。"
+  },
+  "exempt_user_sids": {
+    "description": "豁免用户 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "白名单：命中的用户不需要签署条款，主要用于“全部用户”模式。豁免优先于用户 SID 列表，但不会解除禁用列表。"
+  },
+  "group_scope_mode": {
+    "description": "群组条款生效范围",
+    "type": "string",
+    "default": "all",
+    "options": ["all", "manual"],
+    "labels": ["全部群组", "手动指定群组 SID"],
+    "obvious_hint": true,
+    "hint": "全部群组：机器人所在的所有群都必须先同意条款，不用逐个添加；手动指定群组 SID：只有下方“群组 SID 列表”里的群才需要签署。"
   },
   "group_sids": {
     "description": "群组 SID 列表",
     "type": "list",
     "default": [],
-    "hint": "手动填写后才会生效。可填写群号、群会话 Session ID 或完整 UMO；群组同意状态按群组整体记录，同意后该群内成员整体放行。"
+    "hint": "“手动指定群组 SID”模式下必须填写才会生效；“全部群组”模式下这里的群同样生效。可填写群号、群会话 Session ID 或完整 UMO；群组同意状态按群组整体记录，同意后该群内成员整体放行。"
+  },
+  "exempt_group_sids": {
+    "description": "豁免群组 SID 列表",
+    "type": "list",
+    "default": [],
+    "hint": "白名单：命中的群不需要签署条款，主要用于“全部群组”模式。豁免优先于群组 SID 列表，但不会解除禁用列表。"
   },
   "admin_sids": {
     "description": "条款管理员 SID 列表",
@@ -99,5 +129,12 @@
     "type": "bool",
     "default": true,
     "hint": "开启后，群聊里 AstrBot 判定为艾特、唤醒词、命令前缀或其它插件命中的交互消息才会触发条款检查；普通群聊消息不会触发。"
+  },
+  "scope_mode_migrated": {
+    "description": "生效范围迁移标记",
+    "type": "bool",
+    "default": false,
+    "invisible": true,
+    "hint": "内部使用：从只支持手动 SID 的旧版本升级时，把已经配置过 SID 列表的作用域保持为手动模式，只会执行一次。"
   }
 }

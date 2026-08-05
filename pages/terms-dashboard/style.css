@@ -151,6 +151,33 @@ textarea {
   background: #fff7f4;
 }
 
+.list-row.exempt {
+  border-color: #cfe3d9;
+  background: #f5fbf8;
+}
+
+.list-row span.tag {
+  display: inline-flex;
+  margin-left: 6px;
+  border: 1px solid #ccd5dd;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.list-row span.tag.auto {
+  border-color: #bcdcd0;
+  background: #eefaf4;
+  color: #12694f;
+}
+
+#scopeModes {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
 .empty {
   color: #7a8794;
 }
