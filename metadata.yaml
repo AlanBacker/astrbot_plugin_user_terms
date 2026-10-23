@@ -2,11 +2,11 @@ name: astrbot_plugin_user_terms
 display_name: 用户条款签署控制
 desc: 用户条款签署控制插件，支持“全部用户 / 全部群组”一键生效或手动指定 SID，要求先同意用户条款后才允许继续使用机器人
 short_desc: 按用户与群组独立记录用户条款同意状态
-version: 1.1.0
+version: 1.2.0
 author: AlanBacker
 repo: "https://github.com/AlanBacker/astrbot_plugin_user_terms"
 astrbot_version: ">=4.9.2"
 pages:
   - name: terms-dashboard
     title: 签署面板
-    description: 查看条款签署状态、豁免与禁用列表并发布新条款。
+    description: 查看与批量修改条款签署状态、豁免与禁用列表并发布新条款。

@@ -18,6 +18,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -73,7 +74,14 @@ button:disabled {
   opacity: 0.55;
 }
 
+button.secondary {
+  border: 1px solid #ccd5dd;
+  background: #fff;
+  color: #303b45;
+}
+
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #ccd5dd;
@@ -114,7 +122,7 @@ textarea {
 
 .layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -190,8 +198,58 @@ textarea {
   margin-bottom: 12px;
 }
 
+.filters {
+  display: flex;
+  gap: 8px;
+}
+
+.filters select {
+  width: auto;
+}
+
 .panel-head input {
   max-width: 280px;
+}
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #e2e8ed;
+  border-radius: 6px;
+  background: #f8fafb;
+  padding: 8px 10px;
+}
+
+.bulk-bar select {
+  width: auto;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: #1f6f5b;
+  cursor: pointer;
+}
+
+th.check,
+td.check {
+  width: 28px;
+  padding-right: 0;
+}
+
+th,
+td.check + td,
+.badge {
+  white-space: nowrap;
+}
+
+tr.selected td {
+  background: #f1f8f5;
 }
 
 .table-wrap {
@@ -250,13 +308,19 @@ code {
   color: #a43624;
 }
 
-.publish {
+.form-panel {
   display: grid;
   gap: 14px;
   margin-top: 12px;
 }
 
-.publish label {
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: 12px;
+}
+
+.form-panel label {
   display: grid;
   gap: 6px;
   color: #303b45;
@@ -269,28 +333,32 @@ code {
   gap: 12px;
 }
 
-#message.success {
+[role="status"].success {
   color: #12694f;
 }
 
-#message.error {
+[role="status"].error {
   color: #a43624;
 }
 
 @media (max-width: 860px) {
   .stats,
-  .layout {
-    grid-template-columns: 1fr;
+  .layout,
+  .form-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .topbar,
   .panel-head,
+  .filters,
   .actions {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .panel-head input {
+  .panel-head input,
+  .filters select {
     max-width: none;
+    width: 100%;
   }
 }

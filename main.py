@@ -40,6 +40,8 @@ SCOPE_MODE_LABELS = {
     "group": {SCOPE_MODE_ALL: "全部群组", SCOPE_MODE_MANUAL: "手动指定群组"},
 }
 SAFE_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+BATCH_SID_SPLIT_RE = re.compile(r"[\s,;，；、]+")
+BATCH_STATUS_LIMIT = 1000
 ALLOWED_SCHEMA_COLUMNS = {
     ("term_acceptances", "terms_revision"): "INTEGER NOT NULL DEFAULT 1",
 }
@@ -353,6 +355,12 @@ class UserTermsPlugin(Star):
                 ["POST"],
                 "Publish new terms and reset acceptance",
             )
+            register_web_api(
+                f"/{PLUGIN_NAME}/batch_status",
+                self.page_batch_status,
+                ["POST"],
+                "Batch update acceptance status",
+            )
         except Exception as exc:
             logger.error(f"{PLUGIN_NAME}: register page api failed: {exc!r}")
 
@@ -543,7 +551,24 @@ class UserTermsPlugin(Star):
             args.append(status)
         yield await self._stop_result(
             event,
-            self._admin_guarded(event, lambda: self._admin_set_status(args, event)),
+            self._admin_guarded(event, lambda: self._admin_set_status(args)),
+        )
+
+    @terms.command("batch", alias={"批量", "批量修改"}, priority=TERMS_INTERCEPT_PRIORITY)
+    async def terms_batch(
+        self,
+        event: AstrMessageEvent,
+        scope_type: str,
+        status: str,
+        targets: GreedyStr,
+    ):
+        """批量修改多个用户或群组的条款签署状态。"""
+        yield await self._stop_result(
+            event,
+            self._admin_guarded(
+                event,
+                lambda: self._admin_batch_set_status(scope_type, status, str(targets)),
+            ),
         )
 
     @terms.command("reset", alias={"重置"}, priority=TERMS_INTERCEPT_PRIORITY)
@@ -1031,6 +1056,8 @@ class UserTermsPlugin(Star):
             "/terms status [user|group] [目标SID] [用户SID]\n"
             "/terms set user <用户SID> <accepted|pending|rejected>\n"
             "/terms set group <群组SID> <accepted|pending|rejected>\n"
+            "/terms batch <user|group> <accepted|pending|rejected> <SID1> [SID2 ...]\n"
+            "/terms batch <user|group> <accepted|pending|rejected> all\n"
             "/terms reset all\n"
             "/terms reset user <用户SID>\n"
             "/terms reset group <群组SID>\n"
@@ -1063,11 +1090,7 @@ class UserTermsPlugin(Star):
             self._format_acceptance_row(row) for row in rows
         )
 
-    def _admin_set_status(
-        self,
-        args: list[str],
-        event: AstrMessageEvent,
-    ) -> str:
+    def _admin_set_status(self, args: list[str]) -> str:
         if len(args) < 3:
             return "参数不足。示例：/terms set user 1919810 accepted"
 
@@ -1090,7 +1113,7 @@ class UserTermsPlugin(Star):
         if not status:
             return "状态只能是 accepted、pending、rejected，或 同意、待签署、拒绝。"
 
-        self._admin_upsert_acceptance(scope_type, scope_id, signer_user_id, status, event)
+        self._set_target_statuses([(scope_type, scope_id)], status, "管理员指令修改")
         target = (
             f"{self._scope_label(scope_type)} {scope_id}"
             if scope_type == "group"
@@ -1099,6 +1122,73 @@ class UserTermsPlugin(Star):
         return (
             f"已将 {target} 设置为 {self._status_label(status)}。"
         )
+
+    def _admin_batch_set_status(
+        self,
+        scope_type_arg: str,
+        status_arg: str,
+        targets_text: str,
+    ) -> str:
+        usage = (
+            "示例：/terms batch user accepted 1919810 114514\n"
+            "或：/terms batch group pending all"
+        )
+        scope_type = self._normalize_scope_type(scope_type_arg)
+        if scope_type not in {"user", "group"}:
+            return f"范围只能是 user 或 group。\n{usage}"
+
+        status = self._normalize_status(status_arg)
+        if not status:
+            return "状态只能是 accepted、pending、rejected，或 同意、待签署、拒绝。"
+
+        scope_ids = self._split_sid_text(targets_text)
+        if len(scope_ids) == 1 and self._normalize_scope_type(scope_ids[0]) == "all":
+            # all 来自已有配置与记录，不受手填数量上限约束。
+            scope_ids = self._known_scope_ids(scope_type)
+            if not scope_ids:
+                return f"暂无可修改的{self._scope_label(scope_type)}目标。"
+        elif not scope_ids:
+            return f"请提供至少一个目标 SID。\n{usage}"
+        elif len(scope_ids) > BATCH_STATUS_LIMIT:
+            return f"一次最多修改 {BATCH_STATUS_LIMIT} 个目标，当前 {len(scope_ids)} 个。"
+
+        count = self._set_target_statuses(
+            [(scope_type, scope_id) for scope_id in scope_ids],
+            status,
+            "管理员指令批量修改",
+        )
+        preview = "、".join(scope_ids[:10])
+        if len(scope_ids) > 10:
+            preview += f" 等 {len(scope_ids)} 个"
+        return (
+            f"已将 {count} 个{self._scope_label(scope_type)}设置为 "
+            f"{self._status_label(status)}：{preview}"
+        )
+
+    def _known_scope_ids(self, scope_type: str) -> list[str]:
+        """返回已配置或已有签署记录的目标 SID，排除豁免名单。"""
+        scope_ids = dict.fromkeys(self._sid_list(f"{scope_type}_sids"))
+        with self._db() as conn:
+            for row in conn.execute(
+                """
+                SELECT DISTINCT scope_id
+                FROM term_acceptances
+                WHERE scope_type = ?
+                ORDER BY scope_id
+                """,
+                (scope_type,),
+            ).fetchall():
+                scope_ids.setdefault(str(row["scope_id"]))
+        exempt_values = self._sid_values(f"exempt_{scope_type}_sids")
+        return [scope_id for scope_id in scope_ids if scope_id not in exempt_values]
+
+    def _split_sid_text(self, text: str) -> list[str]:
+        cleaned: list[str] = []
+        for value in BATCH_SID_SPLIT_RE.split(str(text or "")):
+            sid = self._clean_sid(value)
+            if sid and sid not in cleaned:
+                cleaned.append(sid)
+        return cleaned
 
     def _admin_reset(self, args: list[str]) -> str:
         if not args:
@@ -1157,54 +1247,72 @@ class UserTermsPlugin(Star):
                 for row in conn.execute(sql, params).fetchall()
             ]
 
-    def _admin_upsert_acceptance(
+    def _set_target_statuses(
         self,
-        scope_type: str,
-        scope_id: str,
-        signer_user_id: str,
+        targets: list[tuple[str, str]],
         status: str,
-        event: AstrMessageEvent,
-    ) -> None:
+        note: str,
+    ) -> int:
+        """按 (范围, 目标 SID) 写入签署状态，返回涉及的目标数。
+
+        已有记录只改状态，保留原签署人的名称、平台与最后触发时间；
+        没有记录的目标会新建一条，等对方下次触发时再补全资料。
+        改为待签署时同时清空提示次数，让对方下次触发时重新看到完整条款。
+        """
+        targets = list(dict.fromkeys(targets))
         now = self._now()
         revision = self._current_terms_revision()
         decided_at = now if status in {STATUS_ACCEPTED, STATUS_REJECTED} else None
+        reset_prompt = status == STATUS_PENDING
         with self._db() as conn:
-            conn.execute(
-                """
-                INSERT INTO term_acceptances (
-                    scope_type, scope_id, signer_user_id, status, prompt_count,
-                    first_seen_at, last_seen_at, prompted_at, decided_at,
-                    signer_name, platform_id, group_id, message_origin,
-                    last_message, terms_revision
+            for scope_type, scope_id in targets:
+                cursor = conn.execute(
+                    """
+                    UPDATE term_acceptances
+                    SET status = ?,
+                        decided_at = ?,
+                        prompt_count = CASE WHEN ? THEN 0 ELSE prompt_count END,
+                        prompted_at = CASE WHEN ? THEN NULL ELSE prompted_at END,
+                        last_message = ?,
+                        terms_revision = ?
+                    WHERE scope_type = ?
+                      AND scope_id = ?
+                    """,
+                    (
+                        status,
+                        decided_at,
+                        reset_prompt,
+                        reset_prompt,
+                        note,
+                        revision,
+                        scope_type,
+                        scope_id,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, 0, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(scope_type, scope_id, signer_user_id) DO UPDATE SET
-                    status = excluded.status,
-                    last_seen_at = excluded.last_seen_at,
-                    decided_at = excluded.decided_at,
-                    signer_name = excluded.signer_name,
-                    platform_id = excluded.platform_id,
-                    group_id = excluded.group_id,
-                    message_origin = excluded.message_origin,
-                    last_message = excluded.last_message,
-                    terms_revision = excluded.terms_revision
-                """,
-                (
-                    scope_type,
-                    scope_id,
-                    signer_user_id,
-                    status,
-                    now,
-                    now,
-                    decided_at,
-                    event.get_sender_name(),
-                    event.get_platform_id(),
-                    event.get_group_id(),
-                    event.unified_msg_origin,
-                    "管理员指令修改",
-                    revision,
-                ),
-            )
+                if cursor.rowcount:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO term_acceptances (
+                        scope_type, scope_id, signer_user_id, status, prompt_count,
+                        first_seen_at, last_seen_at, decided_at, last_message,
+                        terms_revision
+                    )
+                    VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        scope_type,
+                        scope_id,
+                        scope_id,
+                        status,
+                        now,
+                        now,
+                        decided_at,
+                        note,
+                        revision,
+                    ),
+                )
+        return len(targets)
 
     def _reset_acceptances(
         self,
@@ -1405,21 +1513,31 @@ class UserTermsPlugin(Star):
         payload = await asyncio.to_thread(self._dashboard_payload)
         return jsonify(payload)
 
-    async def page_publish_terms(self):
+    async def _read_json_object(self, action: str) -> tuple[dict[str, Any] | None, Any]:
+        """读取 JSON 对象请求体；失败时返回 (None, 错误响应)。"""
         if not request.is_json:
-            return jsonify({"ok": False, "error": "request body must be JSON"}), 415
+            return None, (jsonify({"ok": False, "error": "request body must be JSON"}), 415)
 
         try:
             body = await request.get_json()
         except Exception:
             logger.error(
-                f"{PLUGIN_NAME}: failed to parse publish request JSON\n"
+                f"{PLUGIN_NAME}: failed to parse {action} request JSON\n"
                 f"{traceback.format_exc()}",
             )
-            return jsonify({"ok": False, "error": "invalid JSON body"}), 400
+            return None, (jsonify({"ok": False, "error": "invalid JSON body"}), 400)
 
         if not isinstance(body, dict):
-            return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+            return None, (
+                jsonify({"ok": False, "error": "JSON body must be an object"}),
+                400,
+            )
+        return body, None
+
+    async def page_publish_terms(self):
+        body, error = await self._read_json_object("publish")
+        if body is None:
+            return error
 
         terms_text = str(body.get("terms_text") or "").strip()
         note = str(body.get("note") or "").strip()
@@ -1432,6 +1550,59 @@ class UserTermsPlugin(Star):
                 "ok": True,
                 "revision": revision,
                 "message": "已发布新条款，并重置所有已记录签署状态。",
+            },
+        )
+
+    async def page_batch_status(self):
+        body, error = await self._read_json_object("batch status")
+        if body is None:
+            return error
+
+        status = self._normalize_status(body.get("status"))
+        if not status:
+            return jsonify(
+                {"ok": False, "error": "status must be accepted, pending or rejected"},
+            ), 400
+
+        raw_targets = body.get("targets")
+        if not isinstance(raw_targets, list) or not raw_targets:
+            return jsonify({"ok": False, "error": "targets must be a non-empty list"}), 400
+
+        targets: list[tuple[str, str]] = []
+        for item in raw_targets:
+            if not isinstance(item, dict):
+                return jsonify({"ok": False, "error": "each target must be an object"}), 400
+            scope_type = self._normalize_scope_type(item.get("scope_type"))
+            scope_id = self._clean_sid(item.get("scope_id"))
+            if scope_type not in {"user", "group"} or not scope_id:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "each target needs scope_type user|group and scope_id",
+                    },
+                ), 400
+            targets.append((scope_type, scope_id))
+
+        targets = list(dict.fromkeys(targets))
+        if len(targets) > BATCH_STATUS_LIMIT:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": f"at most {BATCH_STATUS_LIMIT} targets per request",
+                },
+            ), 400
+
+        count = await asyncio.to_thread(
+            self._set_target_statuses,
+            targets,
+            status,
+            "签署面板批量修改",
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "updated": count,
+                "message": f"已将 {count} 个目标设置为{self._status_label(status)}。",
             },
         )
 

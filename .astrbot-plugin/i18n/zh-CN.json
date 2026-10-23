@@ -37,7 +37,7 @@
     },
     "admin_sids": {
       "description": "条款管理员 SID 列表",
-      "hint": "这些用户可以在聊天中使用 /terms 管理指令查看、修改、重置签署状态并发布新条款。"
+      "hint": "这些用户可以在聊天中使用 /terms 管理指令查看、修改（含 /terms batch 批量修改）、重置签署状态并发布新条款。"
     },
     "disabled_user_sids": {
       "description": "禁用用户 SID 列表",
@@ -95,7 +95,7 @@
   "pages": {
     "terms-dashboard": {
       "title": "签署面板",
-      "description": "查看条款签署状态、豁免与禁用列表并发布新条款。"
+      "description": "查看与批量修改条款签署状态、豁免与禁用列表并发布新条款。"
     }
   }
 }

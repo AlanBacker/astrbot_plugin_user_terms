@@ -51,12 +51,35 @@
         <section class="panel table-panel">
           <div class="panel-head">
             <h2>签署记录</h2>
-            <input id="filter" type="search" placeholder="筛选 SID / 用户名 / 平台" />
+            <div class="filters">
+              <select id="statusFilter" aria-label="按状态筛选">
+                <option value="">全部状态</option>
+                <option value="accepted">已同意</option>
+                <option value="pending">待签署</option>
+                <option value="rejected">已拒绝</option>
+                <option value="pending_new_terms">旧条款</option>
+              </select>
+              <input id="filter" type="search" placeholder="筛选 SID / 用户名 / 平台" />
+            </div>
+          </div>
+          <div class="bulk-bar">
+            <span id="selectedCount">已选 0 个目标</span>
+            <select id="bulkStatus" aria-label="批量修改为">
+              <option value="accepted">改为已同意</option>
+              <option value="pending">改为待签署</option>
+              <option value="rejected">改为已拒绝</option>
+            </select>
+            <button id="applySelected" type="button" disabled>修改所选</button>
+            <button id="clearSelected" type="button" class="secondary" disabled>清空选择</button>
+            <span id="bulkMessage" role="status"></span>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th class="check">
+                    <input id="selectAll" type="checkbox" aria-label="全选当前筛选结果" />
+                  </th>
                   <th>范围</th>
                   <th>目标 SID</th>
                   <th>签署用户</th>
@@ -72,7 +95,39 @@
         </section>
       </section>
 
-      <section class="panel publish">
+      <section class="panel form-panel">
+        <div>
+          <h2>按 SID 批量修改</h2>
+          <p>可以给还没触发过机器人的用户或群组预先设置签署状态。每行一个 SID，也可以用逗号或空格分隔。</p>
+        </div>
+        <div class="form-row">
+          <label>
+            范围
+            <select id="batchScope">
+              <option value="user">用户</option>
+              <option value="group">群组</option>
+            </select>
+          </label>
+          <label>
+            目标状态
+            <select id="batchStatus">
+              <option value="accepted">已同意</option>
+              <option value="pending">待签署</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          SID 列表
+          <textarea id="batchSids" rows="4" placeholder="1919810&#10;114514"></textarea>
+        </label>
+        <div class="actions">
+          <button id="batchApply" type="button">批量修改</button>
+          <span id="batchMessage" role="status"></span>
+        </div>
+      </section>
+
+      <section class="panel form-panel">
         <div>
           <h2>发布新条款</h2>
           <p>发布后会把所有已记录用户重置为待签署，下一次触发机器人时需要重新同意。</p>
